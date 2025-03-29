@@ -10,17 +10,17 @@ VERSION = "v2.1"  # or any identifier you like
 SPOONACULAR_API_KEY = os.environ.get("EXPO_PUBLIC_SPOONACULAR_API_KEY")
 SPOONACULAR_ENDPOINT = 'https://api.spoonacular.com/recipes/complexSearch'
 
-# Define keywords typically associated with each vibe
+# A broader set of keywords for each vibe to yield more recipe results.
 vibe_keywords = {
-    "Cozy": ["cheese", "potato", "broth"],
-    "Energetic": ["banana", "spinach", "protein"],
-    "Excited": ["jalapeno", "bacon", "beef"],
-    "Relaxed": ["pasta", "mushroom", "butter"],
-    "Playful": ["chocolate", "sprinkles", "berries"],
-    "Calm": ["ginger", "tea", "rice"],
-    "Contemplative": ["tofu", "lentils", "eggplant"],
-    "Thoughtful": ["zucchini", "noodles", "parmesan"],
-    "Reflective": ["ramen", "soy", "curry"]
+    "Cozy": ["cheese", "potato", "broth", "soup", "stew", "comfort"],
+    "Energetic": ["banana", "spinach", "protein", "energy", "power", "vitality"],
+    "Excited": ["jalapeno", "bacon", "beef", "spicy", "zest", "pepper"],
+    "Relaxed": ["pasta", "mushroom", "butter", "creamy", "comfort", "smooth"],
+    "Playful": ["chocolate", "sprinkles", "berries", "fun", "colorful", "candy"],
+    "Calm": ["ginger", "tea", "rice", "herbal", "soothing", "calm"],
+    "Contemplative": ["tofu", "lentils", "eggplant", "meditate", "mindful", "quiet"],
+    "Thoughtful": ["zucchini", "noodles", "parmesan", "savor", "mellow", "subtle"],
+    "Reflective": ["ramen", "soy", "curry", "introspective", "ponder", "soulful"]
 }
 
 def score_recipe(recipe, vibe):
@@ -37,6 +37,7 @@ def score_recipe(recipe, vibe):
     base_score += ready_time_score * 0.3  # 30% weight
 
     # Factor 2: Keyword Relevance Score (based on vibe keywords in the title)
+    # Use our broader keyword list if vibe is recognized; otherwise default to vibe as keyword.
     keywords = vibe_keywords.get(vibe, [vibe])
     title = recipe.get('title', '').lower()
     keyword_matches = sum(1 for word in keywords if word.lower() in title)
@@ -45,7 +46,7 @@ def score_recipe(recipe, vibe):
 
     # Factor 3: Popularity (using aggregateLikes)
     popularity = recipe.get('aggregateLikes', 0)
-    popularity_score = min(popularity / 100.0, 1.0)  # Normalize assuming 100 likes is excellent
+    popularity_score = min(popularity / 100.0, 1.0)
     base_score += popularity_score * 0.2  # 20% weight
 
     # Factor 4: Spoonacular's own score (normalized from 0 to 1)
@@ -71,48 +72,48 @@ def get_best_recipe():
         vibe = req_data["vibe"]
         print("🔍 Vibe is:", vibe)
 
+        # Look up keywords; if vibe isn't found, default to using the vibe word.
         keywords = vibe_keywords.get(vibe, [vibe])
-        print("🧠 Spoonacular ingredients:", keywords)
+        print("🧠 Using keywords:", keywords)
 
-        # Make request to Spoonacular API
+        # Use the limit from the request or default to 20 (increased to yield more recipes)
+        limit = req_data.get("limit", 20)
+
         spoonacular_response = requests.get(SPOONACULAR_ENDPOINT, params={
             "apiKey": SPOONACULAR_API_KEY,
             "includeIngredients": ','.join(keywords),
-            "number": 10,
+            "number": limit,
             "addRecipeInformation": True
         })
-        
-        # Log status code and any potential error from Spoonacular
+
         print("📡 Spoonacular response status:", spoonacular_response.status_code)
         spoonacular_data = spoonacular_response.json()
         print("📦 Raw Spoonacular data:", spoonacular_data)
 
         if "results" not in spoonacular_data or not spoonacular_data["results"]:
             print("⚠️ No results found for vibe, returning fallback")
-            return jsonify({
+            fallback_recipe = {
                 "title": "Fallback Recipe",
                 "image": "https://via.placeholder.com/312x231.png?text=No+Recipe",
                 "sourceUrl": "https://example.com",
                 "readyInMinutes": 0,
                 "vibe": vibe,
                 "score": 0
-            })
+            }
+            return jsonify([fallback_recipe])  # Return a list with one fallback recipe
 
         recipes = spoonacular_data["results"]
-        best = max(recipes, key=lambda r: score_recipe(r, vibe))
 
-        print("🏆 Best recipe selected:", best["title"])
-        final_score = round(score_recipe(best, vibe) * 100)
-        print("🔢 Final score sent to client:", final_score)
+        # Compute a score for each recipe and add it to the recipe data.
+        for recipe in recipes:
+            computed_score = round(score_recipe(recipe, vibe) * 100)
+            recipe["score"] = computed_score
 
-        return jsonify({
-            "title": best.get("title"),
-            "image": best.get("image"),
-            "sourceUrl": best.get("sourceUrl"),
-            "readyInMinutes": best.get("readyInMinutes"),
-            "vibe": vibe,
-            "score": final_score
-        })
+        # Sort recipes in descending order by score.
+        sorted_recipes = sorted(recipes, key=lambda r: r["score"], reverse=True)
+
+        print("🏆 Returning", len(sorted_recipes), "recipes for vibe", vibe)
+        return jsonify(sorted_recipes)
 
     except Exception as e:
         print("❌ Exception:", str(e))

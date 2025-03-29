@@ -12,7 +12,7 @@ import {
 import axios from 'axios';
 import { getWeather } from './weather';
 
-// Map weather conditions & moods to vibe
+// Mapping weather conditions & moods to vibes
 const moodWeatherVibes = {
   Clear: {
     '🥳': 'Energetic',
@@ -31,74 +31,83 @@ const moodWeatherVibes = {
   },
 };
 
+// Helper function to fetch recipes for a given vibe
+const fetchRecipes = async (endpoint, vibeValue) => {
+  try {
+    const response = await axios.post(
+      endpoint,
+      { vibe: vibeValue, limit: 15, randomize: true, requestId: Date.now() },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    // Normalize response into an array
+    let results = [];
+    if (Array.isArray(response.data)) {
+      results = response.data;
+    } else if (response.data && typeof response.data === 'object') {
+      results = [response.data];
+    }
+    // Filter out any invalid entries (only objects with a title)
+    results = results.filter(
+      (r) => r && typeof r === 'object' && r.title && typeof r.title === 'string'
+    );
+    return results;
+  } catch (error) {
+    console.error('Error in fetchRecipes for vibe:', vibeValue, error);
+    return [];
+  }
+};
+
 export default function App() {
   const [weather, setWeather] = useState(null);
   const [selectedMood, setSelectedMood] = useState(null);
   const [vibe, setVibe] = useState('');
-  const [recipes, setRecipes] = useState([]); // Can store multiple recipes
+  const [recipes, setRecipes] = useState([]); // Array of recipe objects
   const [loading, setLoading] = useState(false);
+
+  // Use fallback URL if env variable not set
+  const flaskURL = process.env.EXPO_PUBLIC_FLASK_URL || 'http://localhost:5000';
+  // Remove trailing slash and add the endpoint path
+  const endpoint = `${flaskURL.replace(/\/$/, '')}/get_best_recipe`;
 
   // Fetch current weather on mount
   useEffect(() => {
     const apiKey = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
     getWeather(apiKey).then((data) => {
-      if (!data.error) {
-        setWeather(data);
-      }
+      if (!data.error) setWeather(data);
     });
   }, []);
 
-  const handleMoodPress = async (mood) => {
-    setSelectedMood(mood);
-    setRecipes([]); // Clear out old recipes
+  const handleMoodPress = async (moodEmoji) => {
+    setSelectedMood(moodEmoji);
+    setRecipes([]);
     setLoading(true);
 
-    // Compute the vibe based on weather condition and mood emoji
+    // Compute vibe using weather and selected emoji
     const condition = weather?.condition;
-    const computedVibe = condition ? moodWeatherVibes[condition]?.[mood] : '';
+    const computedVibe = condition ? moodWeatherVibes[condition]?.[moodEmoji] : '';
     setVibe(computedVibe);
 
-    const flaskURL = process.env.EXPO_PUBLIC_FLASK_URL;
+    // First fetch: vibe-specific recipes
+    let primaryRecipes = await fetchRecipes(endpoint, computedVibe);
 
-    try {
-      // Primary call: request more recipes (limit: 10) with randomization
-      const response = await axios.post(
-        `${flaskURL}/get_best_recipe`,
-        { vibe: computedVibe, limit: 10, randomize: true },
-        { headers: { 'Content-Type': 'application/json' } }
+    // If not enough recipes, fetch fallback recipes with a generic vibe
+    if (primaryRecipes.length < 3) {
+      console.log('Fewer than 3 recipes found; fetching fallback recipes...');
+      const fallbackRecipes = await fetchRecipes(endpoint, 'Any');
+      // Merge and remove duplicates based on recipe title
+      const merged = [...primaryRecipes, ...fallbackRecipes];
+      const uniqueRecipes = Array.from(
+        new Map(merged.map((r) => [r.title, r])).values()
       );
-
-      let fetchedRecipes = Array.isArray(response.data)
-        ? response.data
-        : [response.data];
-
-      // If too few recipes are returned, perform a fallback query
-      if (fetchedRecipes.length < 3) {
-        const fallbackResponse = await axios.post(
-          `${flaskURL}/get_best_recipe`,
-          { vibe: 'Any', limit: 10, randomize: true },
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-
-        const fallbackRecipes = Array.isArray(fallbackResponse.data)
-          ? fallbackResponse.data
-          : [fallbackResponse.data];
-
-        // Merge and remove duplicates based on title
-        const merged = [...fetchedRecipes, ...fallbackRecipes];
-        const uniqueRecipes = Array.from(
-          new Map(merged.map((r) => [r.title, r])).values()
-        );
-        // Optionally, shuffle for more variety
-        uniqueRecipes.sort(() => Math.random() - 0.5);
-        fetchedRecipes = uniqueRecipes;
-      }
-
-      setRecipes(fetchedRecipes);
-    } catch (error) {
-      console.error('Error fetching recipes:', error);
-      setRecipes([]);
+      // Shuffle the array for randomness
+      uniqueRecipes.sort(() => Math.random() - 0.5);
+      primaryRecipes = uniqueRecipes;
+    } else {
+      // Shuffle primaryRecipes so same mood yields a different order each time
+      primaryRecipes.sort(() => Math.random() - 0.5);
     }
+
+    setRecipes(primaryRecipes);
     setLoading(false);
   };
 
@@ -130,9 +139,9 @@ export default function App() {
         <View style={styles.moodCard}>
           <Text style={styles.moodPrompt}>How are you feeling today?</Text>
           <View style={styles.emojiRow}>
-            {['🥳', '😌', '🤔'].map((mood) => (
-              <TouchableOpacity key={mood} onPress={() => handleMoodPress(mood)}>
-                <Text style={styles.emoji}>{mood}</Text>
+            {['🥳', '😌', '🤔'].map((moodEmoji) => (
+              <TouchableOpacity key={moodEmoji} onPress={() => handleMoodPress(moodEmoji)}>
+                <Text style={styles.emoji}>{moodEmoji}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -147,7 +156,7 @@ export default function App() {
         )}
 
         {/* MOOD MATCHES HEADER */}
-        {(!loading && vibe && recipes.length > 0) && (
+        {!loading && vibe && recipes.length > 0 && (
           <View style={styles.moodMatchesRow}>
             <Text style={styles.moodMatchesTitle}>Your Mood Matches</Text>
             <Text style={styles.moodVibe}>{vibe} Vibe</Text>
@@ -157,31 +166,27 @@ export default function App() {
         {/* RECIPE CARDS */}
         {!loading &&
           recipes.length > 0 &&
-          recipes.map((recipe, index) => {
-            // Ensure recipe is a valid object with a title
-            if (!recipe || typeof recipe !== 'object' || !recipe.title) return null;
-            return (
-              <View key={index} style={styles.recipeCard}>
-                <View style={styles.imageContainer}>
-                  <Image source={{ uri: recipe.image }} style={styles.recipeImage} />
-                  {'score' in recipe && (
-                    <View style={styles.scoreBadge}>
-                      <Text style={styles.scoreBadgeText}>Score: {recipe.score}</Text>
-                    </View>
+          recipes.map((recipe, index) => (
+            <View key={index} style={styles.recipeCard}>
+              <View style={styles.imageContainer}>
+                <Image source={{ uri: recipe.image }} style={styles.recipeImage} />
+                {'score' in recipe && (
+                  <View style={styles.scoreBadge}>
+                    <Text style={styles.scoreBadgeText}>Score: {recipe.score}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.recipeDetails}>
+                <View>
+                  <Text style={styles.recipeTitle}>{recipe.title}</Text>
+                  {recipe.readyInMinutes && (
+                    <Text style={styles.recipeTime}>{recipe.readyInMinutes} mins</Text>
                   )}
                 </View>
-                <View style={styles.recipeDetails}>
-                  <View>
-                    <Text style={styles.recipeTitle}>{recipe.title}</Text>
-                    {recipe.readyInMinutes && (
-                      <Text style={styles.recipeTime}>{recipe.readyInMinutes} mins</Text>
-                    )}
-                  </View>
-                  <Text style={styles.arrow}>›</Text>
-                </View>
+                <Text style={styles.arrow}>›</Text>
               </View>
-            );
-          })}
+            </View>
+          ))}
 
         {/* NO RECIPES FOUND */}
         {!loading && selectedMood && recipes.length === 0 && (

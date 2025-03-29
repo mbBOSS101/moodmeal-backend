@@ -1,7 +1,9 @@
-// weather.js
 import * as Location from 'expo-location';
 
-export async function getWeather(apiKey) {
+// Load API key from environment
+const OPENWEATHER_API_KEY = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
+
+export async function getWeather(apiKey = OPENWEATHER_API_KEY) {
   const { status } = await Location.requestForegroundPermissionsAsync();
 
   if (status !== 'granted') {

@@ -1,0 +1,7 @@
+services:
+  - type: web                        # This is a web server (not just a script or job)
+    name: moodmeal-api               # What to call it on Render
+    env: python                      # Use a Python environment
+    plan: free                       # Use the free hosting plan
+    buildCommand: ""                 # No build step (like for React or Node)
+    startCommand: python recipe_scoring_api.py  # This is what starts the server

@@ -1,11 +1,10 @@
-// RecipeScreen.js
-import React, { useEffect, useState } from 'react';
-import { View, Text, Image, StyleSheet, ActivityIndicator, ScrollView, Linking, TouchableOpacity } from 'react-native';
-import axios from 'axios';
+import React from 'react';
+import { View, Text, Image, StyleSheet, ScrollView, Linking, TouchableOpacity } from 'react-native';
 
 export default function RecipeScreen({ route }) {
   const { recipe, vibe } = route.params;
-  const [loading, setLoading] = useState(false);
+
+  console.log("🧾 RecipeScreen received:", recipe); // Debug log
 
   if (!recipe || !recipe.title) {
     return (
@@ -25,8 +24,9 @@ export default function RecipeScreen({ route }) {
         <Text style={styles.time}>⏱️ Ready in: {recipe.readyInMinutes} minutes</Text>
       )}
 
-      {recipe.score && (
-        <Text style={styles.score}>⭐ Score: {Math.round(recipe.score * 100)} / 100</Text>
+      {/* Always try to show score, even if 0 */}
+      {'score' in recipe && (
+        <Text style={styles.score}>⭐ Score: {recipe.score} / 100</Text>
       )}
 
       {recipe.sourceUrl && (

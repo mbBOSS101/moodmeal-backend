@@ -1,4 +1,3 @@
-// App.js
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { getWeather } from './weather';
@@ -27,18 +26,6 @@ const moodWeatherVibes = {
   }
 };
 
-const vibeKeywords = {
-  "Cozy": ["stew", "soup", "mac and cheese"],
-  "Energetic": ["smoothie", "salad", "protein bowl"],
-  "Excited": ["burger", "pizza", "nachos"],
-  "Relaxed": ["pasta", "risotto", "grilled cheese"],
-  "Playful": ["tacos", "cupcakes", "skewers"],
-  "Calm": ["tea", "rice bowl", "miso soup"],
-  "Contemplative": ["chickpea stew", "lentil soup", "tofu stir fry"],
-  "Thoughtful": ["noodle bowl", "quiche", "baked potato"],
-  "Reflective": ["ramen", "dumplings", "curry"]
-};
-
 const getTemperatureMood = (temperature) => {
   if (temperature < 5) return "Cold";
   if (temperature < 10) return "Chilly";
@@ -54,7 +41,8 @@ function HomeScreen({ navigation }) {
   const [weather, setWeather] = useState(null);
 
   useEffect(() => {
-    getWeather('89cea4a1a1488bef89b6bc52aa155980').then((data) => {
+    const apiKey = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
+    getWeather(apiKey).then((data) => {
       setWeather(data);
     });
   }, []);
@@ -65,13 +53,16 @@ function HomeScreen({ navigation }) {
     const vibe = condition ? moodWeatherVibes[condition]?.[mood] : null;
 
     try {
+      const flaskURL = process.env.EXPO_PUBLIC_FLASK_URL;
       const response = await axios.post(
-        'http://192.168.86.23:5050/get_best_recipe',
-        { vibe: vibe },
+        `${flaskURL}/get_best_recipe`,
+        { vibe },
         { headers: { 'Content-Type': 'application/json' } }
       );
 
       const recipe = response.data;
+      console.log("📦 Recipe received from Flask:", recipe); // ✅ Debug log
+
       navigation.navigate('Recipe', {
         mood,
         weather,

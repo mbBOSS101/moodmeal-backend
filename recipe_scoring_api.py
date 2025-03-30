@@ -4,19 +4,21 @@ import os
 
 app = Flask(__name__)
 
-VERSION = "v2.1"  # or any identifier you like
+VERSION = "v3.1"  # Updated version identifier
 
 # Securely fetch API key from environment variable
 SPOONACULAR_API_KEY = os.environ.get("EXPO_PUBLIC_SPOONACULAR_API_KEY")
-SPOONACULAR_ENDPOINT = 'https://api.spoonacular.com/recipes/complexSearch'
+# Endpoints
+SPOONACULAR_SEARCH_ENDPOINT = 'https://api.spoonacular.com/recipes/complexSearch'
+SPOONACULAR_RANDOM_ENDPOINT = 'https://api.spoonacular.com/recipes/random'
 
-# A broader set of keywords for each vibe to yield more recipe results.
+# Broader set of keywords per vibe to yield more recipe results.
 vibe_keywords = {
     "Cozy": ["cheese", "potato", "broth", "soup", "stew", "comfort"],
     "Energetic": ["banana", "spinach", "protein", "energy", "power", "vitality"],
     "Excited": ["jalapeno", "bacon", "beef", "spicy", "zest", "pepper"],
     "Relaxed": ["pasta", "mushroom", "butter", "creamy", "comfort", "smooth"],
-    "Playful": ["chocolate", "sprinkles", "berries", "fun", "colorful", "candy"],
+    "Playful": ["zucchini", "noodles", "parmesan", "savor", "mellow", "subtle"],
     "Calm": ["ginger", "tea", "rice", "herbal", "soothing", "calm"],
     "Contemplative": ["tofu", "lentils", "eggplant", "meditate", "mindful", "quiet"],
     "Thoughtful": ["zucchini", "noodles", "parmesan", "savor", "mellow", "subtle"],
@@ -33,11 +35,10 @@ def score_recipe(recipe, vibe):
     elif ready_in >= 90:
         ready_time_score = 0.0
     else:
-        ready_time_score = (90 - ready_in) / 60.0  # Linear scaling between 30 and 90 minutes
+        ready_time_score = (90 - ready_in) / 60.0
     base_score += ready_time_score * 0.3  # 30% weight
 
     # Factor 2: Keyword Relevance Score (based on vibe keywords in the title)
-    # Use our broader keyword list if vibe is recognized; otherwise default to vibe as keyword.
     keywords = vibe_keywords.get(vibe, [vibe])
     title = recipe.get('title', '').lower()
     keyword_matches = sum(1 for word in keywords if word.lower() in title)
@@ -72,46 +73,68 @@ def get_best_recipe():
         vibe = req_data["vibe"]
         print("🔍 Vibe is:", vibe)
 
-        # Look up keywords; if vibe isn't found, default to using the vibe word.
+        # Look up keywords; if vibe not found, default to using the vibe word.
         keywords = vibe_keywords.get(vibe, [vibe])
         print("🧠 Using keywords:", keywords)
 
-        # Use the limit from the request or default to 20 (increased to yield more recipes)
+        # Use the limit from the request or default to 20.
         limit = req_data.get("limit", 20)
 
-        spoonacular_response = requests.get(SPOONACULAR_ENDPOINT, params={
+        # Query 1: Vibe-specific query using the keywords.
+        params1 = {
             "apiKey": SPOONACULAR_API_KEY,
             "includeIngredients": ','.join(keywords),
             "number": limit,
             "addRecipeInformation": True
-        })
+        }
+        response1 = requests.get(SPOONACULAR_SEARCH_ENDPOINT, params=params1)
+        data1 = response1.json()
+        results1 = data1.get("results", [])
+        print("📦 Vibe-specific results:", len(results1))
 
-        print("📡 Spoonacular response status:", spoonacular_response.status_code)
-        spoonacular_data = spoonacular_response.json()
-        print("📦 Raw Spoonacular data:", spoonacular_data)
+        # Query 2: Generic query without filtering ingredients.
+        params2 = {
+            "apiKey": SPOONACULAR_API_KEY,
+            "number": limit,
+            "addRecipeInformation": True
+        }
+        response2 = requests.get(SPOONACULAR_SEARCH_ENDPOINT, params=params2)
+        data2 = response2.json()
+        results2 = data2.get("results", [])
+        print("📦 Generic results:", len(results2))
 
-        if "results" not in spoonacular_data or not spoonacular_data["results"]:
-            print("⚠️ No results found for vibe, returning fallback")
-            fallback_recipe = {
-                "title": "Fallback Recipe",
-                "image": "https://via.placeholder.com/312x231.png?text=No+Recipe",
-                "sourceUrl": "https://example.com",
-                "readyInMinutes": 0,
-                "vibe": vibe,
-                "score": 0
+        # Merge both sets.
+        merged = results1 + results2
+
+        # Deduplicate based on a unique property (use recipe 'id' if available; fallback to title).
+        unique_dict = {}
+        for recipe in merged:
+            key = recipe.get("id") or recipe.get("title")
+            if key:
+                unique_dict[key] = recipe
+        unique_recipes = list(unique_dict.values())
+
+        # Fallback Handling:
+        # If no recipes are found from both queries, fetch random recipes.
+        if not unique_recipes:
+            print("⚠️ No recipes found from queries; fetching random recipes fallback.")
+            params_random = {
+                "apiKey": SPOONACULAR_API_KEY,
+                "number": limit,
+                "addRecipeInformation": True
             }
-            return jsonify([fallback_recipe])  # Return a list with one fallback recipe
+            response_random = requests.get(SPOONACULAR_RANDOM_ENDPOINT, params=params_random)
+            data_random = response_random.json()
+            unique_recipes = data_random.get("recipes", [])
+            print("📦 Random recipes fallback results:", len(unique_recipes))
 
-        recipes = spoonacular_data["results"]
-
-        # Compute a score for each recipe and add it to the recipe data.
-        for recipe in recipes:
+        # Score each recipe and add the score to its data.
+        for recipe in unique_recipes:
             computed_score = round(score_recipe(recipe, vibe) * 100)
             recipe["score"] = computed_score
 
-        # Sort recipes in descending order by score.
-        sorted_recipes = sorted(recipes, key=lambda r: r["score"], reverse=True)
-
+        # Sort recipes by score in descending order.
+        sorted_recipes = sorted(unique_recipes, key=lambda r: r["score"], reverse=True)
         print("🏆 Returning", len(sorted_recipes), "recipes for vibe", vibe)
         return jsonify(sorted_recipes)
 

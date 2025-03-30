@@ -12,7 +12,7 @@ import {
 import axios from 'axios';
 import { getWeather } from './weather';
 
-// Mapping weather conditions & moods to vibes
+// Map weather conditions & moods to vibe
 const moodWeatherVibes = {
   Clear: {
     '🥳': 'Energetic',
@@ -31,32 +31,6 @@ const moodWeatherVibes = {
   },
 };
 
-// Helper function to fetch recipes for a given vibe
-const fetchRecipes = async (endpoint, vibeValue) => {
-  try {
-    const response = await axios.post(
-      endpoint,
-      { vibe: vibeValue, limit: 15, randomize: true, requestId: Date.now() },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    // Normalize response into an array
-    let results = [];
-    if (Array.isArray(response.data)) {
-      results = response.data;
-    } else if (response.data && typeof response.data === 'object') {
-      results = [response.data];
-    }
-    // Filter out any invalid entries (only objects with a title)
-    results = results.filter(
-      (r) => r && typeof r === 'object' && r.title && typeof r.title === 'string'
-    );
-    return results;
-  } catch (error) {
-    console.error('Error in fetchRecipes for vibe:', vibeValue, error);
-    return [];
-  }
-};
-
 export default function App() {
   const [weather, setWeather] = useState(null);
   const [selectedMood, setSelectedMood] = useState(null);
@@ -64,50 +38,58 @@ export default function App() {
   const [recipes, setRecipes] = useState([]); // Array of recipe objects
   const [loading, setLoading] = useState(false);
 
-  // Use fallback URL if env variable not set
+  // Fallback to localhost if the environment variable is missing
   const flaskURL = process.env.EXPO_PUBLIC_FLASK_URL || 'http://localhost:5000';
-  // Remove trailing slash and add the endpoint path
-  const endpoint = `${flaskURL.replace(/\/$/, '')}/get_best_recipe`;
 
   // Fetch current weather on mount
   useEffect(() => {
     const apiKey = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
     getWeather(apiKey).then((data) => {
-      if (!data.error) setWeather(data);
+      if (!data.error) {
+        setWeather(data);
+      }
     });
   }, []);
 
-  const handleMoodPress = async (moodEmoji) => {
-    setSelectedMood(moodEmoji);
-    setRecipes([]);
+  const handleMoodPress = async (mood) => {
+    setSelectedMood(mood);
+    setRecipes([]); // Clear out previous recipes
     setLoading(true);
 
-    // Compute vibe using weather and selected emoji
+    // Compute the vibe based on weather condition and mood emoji
     const condition = weather?.condition;
-    const computedVibe = condition ? moodWeatherVibes[condition]?.[moodEmoji] : '';
+    const computedVibe = condition ? moodWeatherVibes[condition]?.[mood] : '';
     setVibe(computedVibe);
 
-    // First fetch: vibe-specific recipes
-    let primaryRecipes = await fetchRecipes(endpoint, computedVibe);
+    // Normalize flaskURL to remove any trailing slash, then add our route
+    const endpoint = `${flaskURL.replace(/\/$/, '')}/get_best_recipe`;
+    console.log('Calling Flask endpoint:', endpoint);
 
-    // If not enough recipes, fetch fallback recipes with a generic vibe
-    if (primaryRecipes.length < 3) {
-      console.log('Fewer than 3 recipes found; fetching fallback recipes...');
-      const fallbackRecipes = await fetchRecipes(endpoint, 'Any');
-      // Merge and remove duplicates based on recipe title
-      const merged = [...primaryRecipes, ...fallbackRecipes];
-      const uniqueRecipes = Array.from(
-        new Map(merged.map((r) => [r.title, r])).values()
+    try {
+      // Request a larger set of recipes with randomization (limit: 15)
+      const response = await axios.post(
+        endpoint,
+        { vibe: computedVibe, limit: 15, randomize: true },
+        { headers: { 'Content-Type': 'application/json' } }
       );
-      // Shuffle the array for randomness
-      uniqueRecipes.sort(() => Math.random() - 0.5);
-      primaryRecipes = uniqueRecipes;
-    } else {
-      // Shuffle primaryRecipes so same mood yields a different order each time
-      primaryRecipes.sort(() => Math.random() - 0.5);
-    }
 
-    setRecipes(primaryRecipes);
+      let fetchedRecipes = Array.isArray(response.data)
+        ? response.data
+        : [response.data];
+
+      // Filter out any items that are not objects or missing a title
+      fetchedRecipes = fetchedRecipes.filter(
+        (r) => r && typeof r === 'object' && r.title
+      );
+
+      // Optionally, shuffle the array to improve variation
+      fetchedRecipes.sort(() => Math.random() - 0.5);
+
+      setRecipes(fetchedRecipes);
+    } catch (error) {
+      console.error('Error fetching recipes:', error);
+      setRecipes([]);
+    }
     setLoading(false);
   };
 

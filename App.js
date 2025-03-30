@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
   View,
@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
-  ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native';
 import axios from 'axios';
 import { getWeather } from './weather';
 
-// Map weather conditions & moods to vibe
 const moodWeatherVibes = {
   Clear: {
     '🥳': 'Energetic',
@@ -31,7 +31,51 @@ const moodWeatherVibes = {
   },
 };
 
-export default function App() {
+// Custom animated loading component – a bowl with an ingredient falling in.
+const LoadingBowl = () => {
+  const ingredientAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(ingredientAnim, {
+        toValue: 1,
+        duration: 1500,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [ingredientAnim]);
+
+  const ingredientTranslateY = ingredientAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-50, 0], // ingredient falls from above the bowl to the bowl's top
+  });
+  const ingredientOpacity = ingredientAnim.interpolate({
+    inputRange: [0, 0.3, 1],
+    outputRange: [0, 1, 0.5],
+  });
+
+  return (
+    <View style={styles.loadingBowlContainer}>
+      {/* Rotate bowl 180° to display right side up */}
+      <View style={[styles.bowl, { transform: [{ rotate: '180deg' }] }]}>
+        {/* Rotate ingredient back 180° so it appears normal */}
+        <Animated.View
+          style={[
+            styles.ingredient,
+            {
+              transform: [{ translateY: ingredientTranslateY }, { rotate: '180deg' }],
+              opacity: ingredientOpacity,
+            },
+          ]}
+        />
+      </View>
+      <Text style={styles.loadingText}>Loading recipes...</Text>
+    </View>
+  );
+};
+
+function App() {
   const [weather, setWeather] = useState(null);
   const [selectedMood, setSelectedMood] = useState(null);
   const [vibe, setVibe] = useState('');
@@ -51,39 +95,44 @@ export default function App() {
     });
   }, []);
 
-  const handleMoodPress = async (mood) => {
-    setSelectedMood(mood);
-    setRecipes([]); // Clear out previous recipes
+  const handleMoodPress = async (moodEmoji) => {
+    setSelectedMood(moodEmoji);
+    setRecipes([]); // Clear previous recipes
     setLoading(true);
 
-    // Compute the vibe based on weather condition and mood emoji
+    // Compute vibe from weather condition and selected emoji.
     const condition = weather?.condition;
-    const computedVibe = condition ? moodWeatherVibes[condition]?.[mood] : '';
+    const computedVibe = condition ? moodWeatherVibes[condition]?.[moodEmoji] : '';
     setVibe(computedVibe);
 
-    // Normalize flaskURL to remove any trailing slash, then add our route
+    // Normalize flaskURL and set the endpoint
     const endpoint = `${flaskURL.replace(/\/$/, '')}/get_best_recipe`;
     console.log('Calling Flask endpoint:', endpoint);
 
     try {
-      // Request a larger set of recipes with randomization (limit: 15)
       const response = await axios.post(
         endpoint,
-        { vibe: computedVibe, limit: 15, randomize: true },
+        { vibe: computedVibe, limit: 20, randomize: true },
         { headers: { 'Content-Type': 'application/json' } }
       );
+
+      console.log('Response data:', response.data);
 
       let fetchedRecipes = Array.isArray(response.data)
         ? response.data
         : [response.data];
 
-      // Filter out any items that are not objects or missing a title
-      fetchedRecipes = fetchedRecipes.filter(
-        (r) => r && typeof r === 'object' && r.title
-      );
+      if (!fetchedRecipes || fetchedRecipes.length === 0) {
+        console.warn('No recipes returned from the backend.');
+      }
 
-      // Optionally, shuffle the array to improve variation
-      fetchedRecipes.sort(() => Math.random() - 0.5);
+      // Sort recipes in descending order by their score (use 0 as fallback)
+      fetchedRecipes.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+      // If there are more than 5, slice the array to display only the top 5 recipes.
+      if (fetchedRecipes.length > 5) {
+        fetchedRecipes = fetchedRecipes.slice(0, 5);
+      }
 
       setRecipes(fetchedRecipes);
     } catch (error) {
@@ -130,12 +179,7 @@ export default function App() {
         </View>
 
         {/* LOADING INDICATOR */}
-        {loading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#2E7D32" />
-            <Text style={styles.loadingText}>Fetching recipes...</Text>
-          </View>
-        )}
+        {loading && <LoadingBowl />}
 
         {/* MOOD MATCHES HEADER */}
         {!loading && vibe && recipes.length > 0 && (
@@ -172,9 +216,7 @@ export default function App() {
 
         {/* NO RECIPES FOUND */}
         {!loading && selectedMood && recipes.length === 0 && (
-          <Text style={styles.noRecipesText}>
-            Sorry, no recipes found. Please try again!
-          </Text>
+          <Text style={styles.noRecipesText}>Sorry, no recipes found. Please try again!</Text>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -229,9 +271,22 @@ const styles = StyleSheet.create({
   emojiRow: { flexDirection: 'row', justifyContent: 'space-around' },
   emoji: { fontSize: 32 },
 
-  /* LOADING */
-  loadingContainer: { marginVertical: 20, alignItems: 'center' },
-  loadingText: { marginTop: 8, fontSize: 16, color: '#2E7D32' },
+  /* LOADING BOWL */
+  loadingBowlContainer: { alignItems: 'center', justifyContent: 'center', marginVertical: 20 },
+  bowl: {
+    width: 100,
+    height: 50,
+    backgroundColor: '#2E7D32',
+    borderTopLeftRadius: 50,
+    borderTopRightRadius: 50,
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  ingredient: { width: 15, height: 15, backgroundColor: '#FFD700', borderRadius: 7.5, marginBottom: 10 },
+  loadingText: { marginTop: 10, fontSize: 16, color: '#2E7D32' },
 
   /* MOOD MATCHES HEADER */
   moodMatchesRow: {
@@ -287,3 +342,5 @@ const styles = StyleSheet.create({
   /* NO RECIPES */
   noRecipesText: { fontSize: 16, color: 'red', marginTop: 20, textAlign: 'center' },
 });
+
+export default App;

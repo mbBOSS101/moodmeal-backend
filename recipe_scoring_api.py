@@ -5,9 +5,9 @@ from sentence_transformers import SentenceTransformer, util
 
 app = Flask(__name__)
 
-VERSION = "v3.semantic_only"  # Updated version identifier
+VERSION = "v3.semantic_batch"  # Updated version identifier
 
-# Use a light model variant and lazy-load it.
+# Use a light model variant and cache it
 MODEL_NAME = "paraphrase-MiniLM-L3-v2"
 model = None  # Global cache for the model
 
@@ -39,7 +39,7 @@ def get_best_recipe():
         # Use the limit from the request or default to 20 recipes.
         limit = req_data.get("limit", 20)
 
-        # Perform a generic query without filtering ingredients.
+        # For simplicity, we'll perform a generic query without ingredient filtering.
         params = {
             "apiKey": SPOONACULAR_API_KEY,
             "number": limit,
@@ -63,7 +63,7 @@ def get_best_recipe():
             recipes = data_random.get("recipes", [])
             print("📦 Random recipes fallback results:", len(recipes))
 
-        # Deduplicate recipes based on a unique property (recipe 'id' or title).
+        # Deduplicate recipes based on unique key (id or title).
         unique_dict = {}
         for recipe in recipes:
             key = recipe.get("id") or recipe.get("title")
@@ -71,21 +71,32 @@ def get_best_recipe():
                 unique_dict[key] = recipe
         unique_recipes = list(unique_dict.values())
 
-        # Compute semantic similarity for ranking.
+        # Load the model (cached).
         model_instance = get_model()
+
+        # Compute the embedding for the mood.
         mood_embedding = model_instance.encode([vibe], convert_to_tensor=True)
 
+        # Gather texts from recipes (combine title and summary if available).
+        texts = []
         for recipe in unique_recipes:
             text = recipe.get("title", "")
             if "summary" in recipe:
                 text += " " + recipe["summary"]
-            recipe_embedding = model_instance.encode([text], convert_to_tensor=True)
-            sim = util.cos_sim(mood_embedding, recipe_embedding)[0][0].item()
-            # Scale similarity to a 0–100 score.
+            texts.append(text)
+
+        # Batch encode all recipe texts.
+        recipe_embeddings = model_instance.encode(texts, convert_to_tensor=True)
+        # Compute cosine similarities in batch.
+        sims = util.cos_sim(mood_embedding, recipe_embeddings)[0]
+
+        # Assign the similarity score (scaled to 0–100) to each recipe.
+        for i, recipe in enumerate(unique_recipes):
+            sim = sims[i].item()
             recipe["score"] = sim * 100
             recipe["mood"] = vibe
 
-        # Sort recipes by score in descending order.
+        # Sort recipes by semantic score in descending order.
         sorted_recipes = sorted(unique_recipes, key=lambda r: r["score"], reverse=True)
         top_recipes = sorted_recipes[:5]
         print("🏆 Returning", len(top_recipes), "recipes for vibe", vibe)
